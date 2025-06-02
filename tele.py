@@ -1,8 +1,8 @@
 import asyncio
 import os
-import time # Meskipun tidak digunakan secara aktif, mungkin berguna di masa depan
+# import time # Tidak digunakan secara aktif, bisa dihapus jika tidak ada rencana
 from telethon import TelegramClient, errors, functions, types
-from telethon.sessions import StringSession # Import ini bisa dihapus jika tidak ada rencana StringSession
+# from telethon.sessions import StringSession # Bisa dihapus jika tidak ada rencana StringSession
 from dotenv import load_dotenv
 import traceback
 
@@ -21,8 +21,8 @@ class C: # Colors
 
 # --- KONFIGURASI EKSEKUSI ---
 AUTOMATIC_PROCESS_ALL = True # True untuk proses otomatis, False untuk konfirmasi manual
-NORMAL_ACTION_DELAY = 5      # Detik menunggu antar aksi normal
-FLOOD_WAIT_BUFFER = 15     # Detik buffer tambahan saat terkena FloodWaitError
+NORMAL_ACTION_DELAY = 5      # Detik menunggu antar aksi pada item BERBEDA
+FLOOD_WAIT_BUFFER = 15     # Detik buffer tambahan saat terkena FloodWaitError (misal: 15-30)
 # -----------------------------------------
 
 load_dotenv()
@@ -63,7 +63,6 @@ def load_whitelist_usernames():
             
             if usernames:
                 print(f"  {C.GREEN}Berhasil memuat {C.BOLD}{len(usernames)}{C.RESET}{C.GREEN} username dari whitelist.{C.RESET}")
-                # print(f"  {C.BLUE}Username di whitelist: {', '.join(usernames)}{C.RESET}") # Uncomment untuk debug
             else:
                 print(f"  {C.YELLOW}File whitelist ditemukan namun kosong atau hanya berisi komentar.{C.RESET}")
         else:
@@ -74,7 +73,7 @@ def load_whitelist_usernames():
 
 async def main():
     print(f"{C.BOLD}{C.MAGENTA}==============================================={C.RESET}")
-    print(f"{C.BOLD}{C.MAGENTA}=== SKRIP MANAJEMEN AKUN TELEGRAM v12 ==={C.RESET}")
+    print(f"{C.BOLD}{C.MAGENTA}=== SKRIP MANAJEMEN AKUN TELEGRAM v13 ==={C.RESET}")
     print(f"{C.BOLD}{C.MAGENTA}==============================================={C.RESET}")
     
     if AUTOMATIC_PROCESS_ALL:
@@ -84,9 +83,8 @@ async def main():
 
     lower_case_whitelist_usernames = load_whitelist_usernames()
 
-    # Menggunakan file sesi default Telethon. Tidak perlu fungsi loadSession() kustom.
     client = TelegramClient(SESSION_FILE_NAME, API_ID, API_HASH,
-                            retry_delay=10,
+                            retry_delay=10, # Delay internal Telethon untuk retry koneksi awal
                             connection_retries=5)
 
     print(f"\n{C.CYAN}Menghubungkan ke Telegram...{C.RESET}")
@@ -124,7 +122,7 @@ async def main():
         
         groups_channels_to_process_entities = []
         bots_to_process_entities = []
-        whitelisted_dialogs_log_ids = set() # Untuk mencatat ID dialog yang di-whitelist agar tidak berulang kali dicetak
+        whitelisted_dialogs_log_ids = set()
 
         print(f"\n{C.CYAN}Memfilter dialog dan menerapkan whitelist...{C.RESET}")
         for i, dialog in enumerate(all_dialogs_api):
@@ -141,20 +139,16 @@ async def main():
 
             display_title = title if title != "Tanpa Judul" else (f"@{username}" if username else f"ID:{entity.id}")
 
-            # Log setiap dialog yang diperiksa (opsional, bisa di-uncomment untuk detail)
-            # print(f"  Memeriksa ({i+1}/{len(all_dialogs_api)}): \"{C.BOLD}{display_title}{C.RESET}\" (Bot: {is_bot_flag}, Username: {username})")
-
             is_whitelisted = False
             if username and username in lower_case_whitelist_usernames:
                 is_whitelisted = True
             
             if is_whitelisted:
-                if dialog.id not in whitelisted_dialogs_log_ids: # Hanya cetak sekali per item whitelist
+                if dialog.id not in whitelisted_dialogs_log_ids:
                     print(f"    {C.BLUE}↳ [WHITELIST] \"{C.BOLD}{display_title}{C.RESET}{C.BLUE}\" akan dilewati.{C.RESET}")
                     whitelisted_dialogs_log_ids.add(dialog.id)
                 continue 
             
-            # Jika tidak di-whitelist, tambahkan ke daftar proses
             if is_bot_flag:
                 bots_to_process_entities.append(dialog.entity)
             elif dialog.is_group or dialog.is_channel:
@@ -175,22 +169,27 @@ async def main():
             for idx, entity_obj in enumerate(groups_channels_to_process_entities):
                 title_to_leave = entity_obj.title if hasattr(entity_obj, 'title') else (f"@{entity_obj.username}" if hasattr(entity_obj, 'username') and entity_obj.username else f"ID:{entity_obj.id}")
                 print(f"\n  ({idx+1}/{len(groups_channels_to_process_entities)}) Memproses: \"{C.BOLD}{title_to_leave}{C.RESET}\"")
+                
+                action_had_flood_wait_group = False
                 try:
                     print(f"    {C.CYAN}↳ Mencoba meninggalkan...{C.RESET}")
-                    await client.delete_dialog(entity_obj) # Untuk grup/channel, ini berarti "leave"
+                    await client.delete_dialog(entity_obj)
                     print(f"    {C.GREEN}↳ [BERHASIL] Meninggalkan \"{title_to_leave}\".{C.RESET}")
                 except errors.FloodWaitError as e:
                     wait_duration = e.seconds + FLOOD_WAIT_BUFFER
-                    print(f"    {C.YELLOW}↳ [FLOOD WAIT] Terkena FloodWaitError. Perlu menunggu {e.seconds} dtk.{C.RESET}")
+                    print(f"    {C.YELLOW}↳ [GAGAL - FLOOD WAIT] Saat meninggalkan \"{title_to_leave}\". Perlu menunggu {e.seconds} dtk.{C.RESET}")
                     print(f"    {C.YELLOW}↳ Akan tidur selama {wait_duration} dtk untuk pemulihan...{C.RESET}")
                     await asyncio.sleep(wait_duration)
-                    print(f"    {C.YELLOW}↳ Selesai menunggu. Item \"{title_to_leave}\" ini mungkin {C.BOLD}belum{C.RESET}{C.YELLOW} selesai diproses. Lanjut ke item berikutnya.{C.RESET}")
-                    continue 
+                    print(f"    {C.YELLOW}↳ Selesai menunggu. Item \"{title_to_leave}\" mungkin {C.BOLD}belum{C.RESET}{C.YELLOW} selesai diproses.{C.RESET}")
+                    action_had_flood_wait_group = True
                 except Exception as e:
                     print(f"    {C.RED}↳ [GAGAL] Meninggalkan \"{title_to_leave}\": {type(e).__name__} - {e}{C.RESET}")
                 
-                if idx < len(groups_channels_to_process_entities) - 1: # Jangan sleep setelah item terakhir
-                    print(f"    {C.CYAN}↳ Menunggu {NORMAL_ACTION_DELAY} detik sebelum item berikutnya...{C.RESET}")
+                if idx < len(groups_channels_to_process_entities) - 1:
+                    if action_had_flood_wait_group:
+                         print(f"    {C.CYAN}↳ (Setelah penanganan FloodWait) Menunggu {NORMAL_ACTION_DELAY} detik tambahan sebelum item berikutnya...{C.RESET}")
+                    else:
+                         print(f"    {C.CYAN}↳ Menunggu {NORMAL_ACTION_DELAY} detik sebelum item berikutnya...{C.RESET}")
                     await asyncio.sleep(NORMAL_ACTION_DELAY)
 
         # --- Fase 2: Hapus Obrolan & Blokir Bot ---
@@ -202,35 +201,50 @@ async def main():
             for idx, bot_entity in enumerate(bots_to_process_entities):
                 bot_name_to_process = bot_entity.first_name if hasattr(bot_entity, 'first_name') and bot_entity.first_name else (f"@{bot_entity.username}" if hasattr(bot_entity, 'username') and bot_entity.username else f"Bot ID:{bot_entity.id}")
                 print(f"\n  ({idx+1}/{len(bots_to_process_entities)}) Memproses bot: \"{C.BOLD}{bot_name_to_process}{C.RESET}\"")
+                
+                action_had_flood_wait_bot = False
+
+                # 1. Blokir Bot
                 try:
-                    # 1. Blokir Bot
-                    try:
-                        print(f"    {C.CYAN}↳ Mencoba memblokir \"{bot_name_to_process}\"...{C.RESET}")
-                        await client(functions.contacts.BlockRequest(id=bot_entity.id))
-                        print(f"    {C.GREEN}↳ [BERHASIL] Memblokir bot.{C.RESET}")
-                    except errors.UserIsBlockedError:
-                        print(f"    {C.BLUE}↳ [INFO] Bot \"{bot_name_to_process}\" sudah diblokir sebelumnya.{C.RESET}")
-                    except Exception as e_block: # Tangani error blokir lainnya
-                        print(f"    {C.RED}↳ [GAGAL BLOKIR] Gagal memblokir \"{bot_name_to_process}\": {type(e_block).__name__} - {e_block}{C.RESET}")
-                        # Tetap lanjut mencoba hapus dialog meskipun blokir gagal
-                    
-                    # 2. Hapus Dialog dengan Bot
+                    print(f"    {C.CYAN}↳ Mencoba memblokir \"{bot_name_to_process}\"...{C.RESET}")
+                    await client(functions.contacts.BlockRequest(id=bot_entity.id))
+                    print(f"    {C.GREEN}↳ [BERHASIL] Memblokir bot.{C.RESET}")
+                except errors.FloodWaitError as e_block_flood:
+                    wait_duration = e_block_flood.seconds + FLOOD_WAIT_BUFFER
+                    print(f"    {C.YELLOW}↳ [GAGAL BLOKIR - FLOOD WAIT] Saat memblokir \"{bot_name_to_process}\". Perlu menunggu {e_block_flood.seconds} dtk.{C.RESET}")
+                    print(f"    {C.YELLOW}↳ Akan tidur selama {wait_duration} dtk untuk pemulihan...{C.RESET}")
+                    await asyncio.sleep(wait_duration)
+                    print(f"    {C.YELLOW}↳ Selesai menunggu. Blokir \"{bot_name_to_process}\" mungkin {C.BOLD}belum{C.RESET}{C.YELLOW} berhasil. Lanjut ke hapus dialog.{C.RESET}")
+                    action_had_flood_wait_bot = True
+                except errors.UserIsBlockedError:
+                    print(f"    {C.BLUE}↳ [INFO] Bot \"{bot_name_to_process}\" sudah diblokir sebelumnya.{C.RESET}")
+                except Exception as e_block: 
+                    print(f"    {C.RED}↳ [GAGAL BLOKIR] Gagal memblokir \"{bot_name_to_process}\": {type(e_block).__name__} - {e_block}{C.RESET}")
+                
+                # 2. Hapus Dialog dengan Bot
+                # Hanya coba hapus jika tidak ada flood wait besar dari blokir yang baru saja terjadi,
+                # atau jika kita ingin tetap mencoba hapus dialognya.
+                # Untuk saat ini, kita tetap mencoba hapus dialog.
+                try:
                     print(f"    {C.CYAN}↳ Mencoba menghapus obrolan dengan \"{bot_name_to_process}\"...{C.RESET}")
                     await client.delete_dialog(bot_entity)
                     print(f"    {C.GREEN}↳ [BERHASIL] Menghapus obrolan.{C.RESET}")
-
-                except errors.FloodWaitError as e:
-                    wait_duration = e.seconds + FLOOD_WAIT_BUFFER
-                    print(f"    {C.YELLOW}↳ [FLOOD WAIT] Terkena FloodWaitError saat memproses \"{bot_name_to_process}\". Perlu menunggu {e.seconds} dtk.{C.RESET}")
+                except errors.FloodWaitError as e_delete_flood:
+                    wait_duration = e_delete_flood.seconds + FLOOD_WAIT_BUFFER
+                    print(f"    {C.YELLOW}↳ [GAGAL HAPUS DIALOG - FLOOD WAIT] Saat menghapus \"{bot_name_to_process}\". Perlu menunggu {e_delete_flood.seconds} dtk.{C.RESET}")
                     print(f"    {C.YELLOW}↳ Akan tidur selama {wait_duration} dtk untuk pemulihan...{C.RESET}")
                     await asyncio.sleep(wait_duration)
-                    print(f"    {C.YELLOW}↳ Selesai menunggu. Bot \"{bot_name_to_process}\" ini mungkin {C.BOLD}belum{C.RESET}{C.YELLOW} selesai diproses sepenuhnya. Lanjut ke bot berikutnya.{C.RESET}")
-                    continue
-                except Exception as e: # Error umum saat memproses bot (selain FloodWait)
-                    print(f"    {C.RED}↳ [GAGAL PROSES] Gagal memproses bot \"{bot_name_to_process}\": {type(e).__name__} - {e}{C.RESET}")
+                    print(f"    {C.YELLOW}↳ Selesai menunggu. Hapus dialog \"{bot_name_to_process}\" mungkin {C.BOLD}belum{C.RESET}{C.YELLOW} berhasil.{C.RESET}")
+                    action_had_flood_wait_bot = True # Tandai bahwa ada flood wait
+                except Exception as e_delete:
+                    print(f"    {C.RED}↳ [GAGAL HAPUS DIALOG] Gagal menghapus obrolan \"{bot_name_to_process}\": {type(e_delete).__name__} - {e_delete}{C.RESET}")
 
-                if idx < len(bots_to_process_entities) - 1: # Jangan sleep setelah item terakhir
-                    print(f"    {C.CYAN}↳ Menunggu {NORMAL_ACTION_DELAY} detik sebelum item berikutnya...{C.RESET}")
+                # Delay sebelum item berikutnya
+                if idx < len(bots_to_process_entities) - 1:
+                    if action_had_flood_wait_bot:
+                        print(f"    {C.CYAN}↳ (Setelah penanganan FloodWait) Menunggu {NORMAL_ACTION_DELAY} detik tambahan sebelum item berikutnya...{C.RESET}")
+                    else:
+                        print(f"    {C.CYAN}↳ Menunggu {NORMAL_ACTION_DELAY} detik sebelum item berikutnya...{C.RESET}")
                     await asyncio.sleep(NORMAL_ACTION_DELAY)
 
         print(f"\n{C.BOLD}{C.GREEN}==============================================={C.RESET}")
@@ -243,20 +257,20 @@ async def main():
         print(f"{C.BOLD}{C.RED}Kesalahan Login: Kode verifikasi (OTP) yang Anda masukkan salah. Harap jalankan lagi.{C.RESET}")
     except errors.PhoneCodeExpiredError:
         print(f"{C.BOLD}{C.RED}Kesalahan Login: Kode verifikasi (OTP) sudah kedaluwarsa. Silakan jalankan lagi.{C.RESET}")
-    except errors.SessionPasswordNeededError: # Jika input password 2FA salah saat login
-        print(f"{C.BOLD}{C.RED}Kesalahan Login: Kata sandi Two-Factor Authentication (2FA) salah. Harap jalankan lagi.{C.RESET}")
+    except errors.SessionPasswordNeededError:
+        print(f"{C.BOLD}{C.RED}Kesalahan Login: Kata sandi Two-Factor Authentication (2FA) salah atau diperlukan. Harap jalankan lagi.{C.RESET}")
     except errors.rpcerrorlist.ApiIdInvalidError:
         print(f"{C.BOLD}{C.RED}Kesalahan Kritis: TELEGRAM_API_ID atau TELEGRAM_API_HASH tidak valid. Periksa kembali di my.telegram.org.{C.RESET}")
-    except ConnectionError:
+    except ConnectionError: # Lebih umum dari errors.NetworkConnectionError
         print(f"{C.BOLD}{C.RED}Kesalahan Koneksi: Tidak dapat terhubung ke server Telegram. Periksa koneksi internet Anda.{C.RESET}")
     except Exception as e:
         print(f"{C.BOLD}{C.RED}Terjadi kesalahan umum yang tidak terduga:{C.RESET}")
         print(f"{C.RED}  Tipe Error : {type(e).__name__}{C.RESET}")
         print(f"{C.RED}  Pesan Error: {e}{C.RESET}")
         print(f"{C.YELLOW}Detail Traceback:{C.RESET}")
-        traceback.print_exc() # Mencetak traceback untuk debug
+        traceback.print_exc()
     finally:
-        if client.is_connected():
+        if 'client' in locals() and client.is_connected(): # Pastikan client terdefinisi
             print(f"\n{C.CYAN}Memutus koneksi ke Telegram...{C.RESET}")
             await client.disconnect()
             print(f"  {C.GREEN}Koneksi berhasil diputus.{C.RESET}")
@@ -267,6 +281,6 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         print(f"\n\n{C.YELLOW}Proses dihentikan oleh pengguna (Ctrl+C).{C.RESET}")
-    except Exception as e: # Menangkap exception yang mungkin terjadi di luar loop asyncio utama
+    except Exception as e:
         print(f"{C.BOLD}{C.RED}Error tak terduga di luar loop utama: {type(e).__name__} - {e}{C.RESET}")
         traceback.print_exc()
