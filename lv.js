@@ -1,14 +1,23 @@
-require('dotenv').config();
-const { TelegramClient, Api, sessions } = require('gram');
+// lv.js - Versi 5 (Final)
+require('dotenv').config(); // Muat variabel dari .env di paling atas
+
+const { TelegramClient, Api, StringSession } = require('gram'); // Perbaikan impor StringSession
 const input = require('input');
 const fs = require('node:fs');
 const path = require('node:path');
 
 // -------------------------------------------------------------------------
-// 1. KONFIGURASI: Ganti dengan apiId dan apiHash Anda
+// Konfigurasi dimuat dari .env
 // -------------------------------------------------------------------------
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
+
+// Validasi sederhana untuk apiId dan apiHash
+if (isNaN(apiId) || !apiHash) { // Cek apakah apiId adalah angka setelah parseInt
+    console.error("Kesalahan: TELEGRAM_API_ID atau TELEGRAM_API_HASH tidak valid atau tidak ditemukan di file .env.");
+    console.error("Pastikan file .env sudah benar dan berisi variabel tersebut (TELEGRAM_API_ID harus berupa angka).");
+    process.exit(1); // Keluar dari skrip jika kredensial tidak ada atau tidak valid
+}
 
 const SESSION_FILE_PATH = path.join(__dirname, 'session.txt');
 const WHITELIST_FILE_PATH = path.join(__dirname, 'whitelist.txt');
@@ -45,7 +54,7 @@ function loadWhitelistUsernames() {
       console.log(`Memuat whitelist usernames dari ${WHITELIST_FILE_PATH}...`);
       const fileContent = fs.readFileSync(WHITELIST_FILE_PATH, 'utf8');
       fileContent
-        .split(/\r?\n/) // Pisahkan per baris (mendukung Windows & Unix line endings)
+        .split(/\r?\n/)
         .forEach(line => {
           const username = line.trim().toLowerCase();
           if (username.length > 0) {
@@ -63,16 +72,16 @@ function loadWhitelistUsernames() {
   } catch (error) {
     console.warn(`Peringatan: Gagal memuat whitelist dari '${WHITELIST_FILE_PATH}': ${error.message}`);
   }
-  return usernames; // Kembalikan array (bisa kosong)
+  return usernames;
 }
 
 
 async function main() {
     let stringSessionValue = loadSession();
-    const lowerCaseWhitelistUsernames = loadWhitelistUsernames(); // Muat whitelist di awal
-    const stringSession = new sessions.StringSession(stringSessionValue);
-  
-    console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v4)...');
+    const lowerCaseWhitelistUsernames = loadWhitelistUsernames();
+    const stringSession = new StringSession(stringSessionValue); // Perbaikan penggunaan StringSession
+
+    console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v5)...');
     const client = new TelegramClient(stringSession, apiId, apiHash, {
         connectionRetries: 5,
     });
@@ -85,7 +94,12 @@ async function main() {
             },
             password: async () => await input.text('Masukkan kata sandi Telegram Anda (jika ada, tekan Enter jika tidak ada): '),
             phoneCode: async () => {
-                if (stringSessionValue && !client.isācijasNeeded()) return '';
+                // Selalu minta phoneCode jika sesi kosong, atau jika sesi ada TAPI koneksi gagal & butuh otorisasi ulang
+                if (stringSessionValue && client.connected && !await client.isUserAuthorized()) {
+                     // Sesi ada tapi tidak terotorisasi, mungkin perlu kode lagi
+                } else if (stringSessionValue && client.connected) {
+                    return ''; // Sesi ada dan terhubung/terotorisasi
+                }
                 return await input.text('Masukkan kode yang Anda terima di Telegram: ');
             },
             onError: (err) => console.error('Kesalahan saat login:', err.message),
@@ -95,7 +109,7 @@ async function main() {
         const currentSession = client.session.save();
         if (currentSession && currentSession !== stringSessionValue) {
             saveSession(currentSession);
-            stringSessionValue = currentSession;
+            // stringSessionValue = currentSession; // Tidak perlu diupdate lagi di sini karena stringSession sudah dibuat
         }
         console.log('---\n');
 
@@ -126,12 +140,6 @@ async function main() {
                         whitelistedDialogsLog.add(dialog.id.toString());
                     }
                 } else {
-                    // Hanya tampilkan dialog yang punya username jika whitelist hanya berdasarkan username
-                    // atau tampilkan semua jika kita mau opsi meninggalkan grup tanpa username juga
-                    // Untuk saat ini, jika tidak ada username, tidak bisa di-whitelist, jadi bisa ditinggalkan.
-                    // Namun, jika pengguna ingin filter hanya yang punya username, perlu logika tambahan.
-                    // Berdasarkan permintaan, fokus pada whitelist username.
-                    // Jadi, jika dialog tidak punya username, ia tidak bisa di-whitelist berdasarkan username.
                     console.log(`${leaveableDialogs.length + 1}. ${dialog.title} (ID: ${dialog.id}, Username: ${dialog.entity.username ? '@'+dialog.entity.username : 'TIDAK ADA'})`);
                     leaveableDialogs.push(dialog);
                 }
@@ -185,7 +193,6 @@ async function main() {
 
         console.log(`\nMemulai proses meninggalkan ${dialogsToLeave.length} grup/channel yang dipilih...`);
         for (const dialog of dialogsToLeave) {
-            // Double check whitelist (sebagai pengaman tambahan)
             const dialogUsernameLower = dialog.entity.username ? dialog.entity.username.toLowerCase() : null;
             if (dialogUsernameLower && lowerCaseWhitelistUsernames.includes(dialogUsernameLower)) {
                  console.log(`   INFO: Melewati "${dialog.title}" (@${dialogUsernameLower}) karena terdeteksi di whitelist (pengaman).`);
@@ -197,13 +204,13 @@ async function main() {
                 if (dialog.isChannel || (dialog.isGroup && dialog.entity?.className === 'Channel')) {
                     await client.invoke( new Api.channels.LeaveChannel({ channel: dialog.entity }) );
                     console.log(`  Berhasil meninggalkan channel/supergroup: "${dialog.title}"`);
-                } else if (dialog.isGroup && dialog.entity?.className === 'Chat') { // Grup dasar (legacy)
+                } else if (dialog.isGroup && dialog.entity?.className === 'Chat') {
                     await client.invoke(new Api.messages.DeleteChatUser({ chatId: dialog.entity.id, userId: await client.getMe() }));
                     console.log(`  Berhasil meninggalkan grup dasar: "${dialog.title}"`);
                 } else {
                      console.warn(`  Tidak dapat menentukan metode untuk meninggalkan "${dialog.title}". Tipe entity: ${dialog.entity?.className}. Username: ${dialog.entity.username ? '@'+dialog.entity.username : 'TIDAK ADA'}`);
                 }
-                await new Promise(resolve => setTimeout(resolve, 2500)); // Jeda antar operasi
+                await new Promise(resolve => setTimeout(resolve, 2500));
             } catch (error) {
                 console.error(`  Gagal meninggalkan "${dialog.title}": ${error.message}`);
                 if (error.errorMessage) console.error(`  Detail Error API: ${error.errorMessage}`);
@@ -214,6 +221,8 @@ async function main() {
         console.error('Terjadi kesalahan umum dalam skrip:', error.message);
         if (error.code === 401 && (error.message.includes('SESSION_REVOKED') || error.message.includes('SESSION_EXPIRED') || error.message.includes('AUTH_KEY_UNREGISTERED'))) {
             console.error("Sesi Anda tidak valid/kedaluwarsa/dicabut. Hapus file 'session.txt' dan coba jalankan lagi untuk login ulang.");
+        } else if (error.message && error.message.includes("Cannot read properties of undefined (reading 'StringSession')")) {
+            console.error("Kesalahan kritis dengan StringSession. Pastikan library 'gram' terinstal dengan benar dan impor sudah sesuai.");
         }
     } finally {
         if (client && client.connected) {
