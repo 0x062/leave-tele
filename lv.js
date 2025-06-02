@@ -1,6 +1,6 @@
 require('dotenv').config();
-const { TelegramClient, Api } = require('gramjs');
-const { StringSession } = require('gramjs/sessions');
+const { TelegramClient, Api } = require('gram');
+const { StringSession } = require('gram/sessions');
 const input = require('input');
 const fs = require('node:fs');
 const path = require('node:path');
