@@ -1,7 +1,7 @@
-// lv.js - Versi 5 (Final)
+// lv.js - Versi 6 (Final - Akses Eksplisit)
 require('dotenv').config(); // Muat variabel dari .env di paling atas
 
-const { TelegramClient, Api, StringSession } = require('gram'); // Perbaikan impor StringSession
+const gram = require('gram'); // Impor seluruh modul gram
 const input = require('input');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,18 +12,16 @@ const path = require('node:path');
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 
-// Validasi sederhana untuk apiId dan apiHash
-if (isNaN(apiId) || !apiHash) { // Cek apakah apiId adalah angka setelah parseInt
+if (isNaN(apiId) || !apiHash) {
     console.error("Kesalahan: TELEGRAM_API_ID atau TELEGRAM_API_HASH tidak valid atau tidak ditemukan di file .env.");
     console.error("Pastikan file .env sudah benar dan berisi variabel tersebut (TELEGRAM_API_ID harus berupa angka).");
-    process.exit(1); // Keluar dari skrip jika kredensial tidak ada atau tidak valid
+    process.exit(1);
 }
 
 const SESSION_FILE_PATH = path.join(__dirname, 'session.txt');
 const WHITELIST_FILE_PATH = path.join(__dirname, 'whitelist.txt');
 // -------------------------------------------------------------------------
 
-// Fungsi untuk memuat sesi dari file
 function loadSession() {
   try {
     if (fs.existsSync(SESSION_FILE_PATH)) {
@@ -36,7 +34,6 @@ function loadSession() {
   return '';
 }
 
-// Fungsi untuk menyimpan sesi ke file
 function saveSession(sessionString) {
   try {
     fs.writeFileSync(SESSION_FILE_PATH, sessionString, 'utf8');
@@ -46,7 +43,6 @@ function saveSession(sessionString) {
   }
 }
 
-// Fungsi untuk memuat username dari file whitelist
 function loadWhitelistUsernames() {
   const usernames = [];
   try {
@@ -79,10 +75,12 @@ function loadWhitelistUsernames() {
 async function main() {
     let stringSessionValue = loadSession();
     const lowerCaseWhitelistUsernames = loadWhitelistUsernames();
-    const stringSession = new StringSession(stringSessionValue); // Perbaikan penggunaan StringSession
+    // Menggunakan gram.sessions.StringSession
+    const stringSession = new gram.sessions.StringSession(stringSessionValue);
 
-    console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v5)...');
-    const client = new TelegramClient(stringSession, apiId, apiHash, {
+    console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v6)...');
+    // Menggunakan gram.TelegramClient
+    const client = new gram.TelegramClient(stringSession, apiId, apiHash, {
         connectionRetries: 5,
     });
 
@@ -94,11 +92,9 @@ async function main() {
             },
             password: async () => await input.text('Masukkan kata sandi Telegram Anda (jika ada, tekan Enter jika tidak ada): '),
             phoneCode: async () => {
-                // Selalu minta phoneCode jika sesi kosong, atau jika sesi ada TAPI koneksi gagal & butuh otorisasi ulang
                 if (stringSessionValue && client.connected && !await client.isUserAuthorized()) {
-                     // Sesi ada tapi tidak terotorisasi, mungkin perlu kode lagi
                 } else if (stringSessionValue && client.connected) {
-                    return ''; // Sesi ada dan terhubung/terotorisasi
+                    return '';
                 }
                 return await input.text('Masukkan kode yang Anda terima di Telegram: ');
             },
@@ -109,7 +105,6 @@ async function main() {
         const currentSession = client.session.save();
         if (currentSession && currentSession !== stringSessionValue) {
             saveSession(currentSession);
-            // stringSessionValue = currentSession; // Tidak perlu diupdate lagi di sini karena stringSession sudah dibuat
         }
         console.log('---\n');
 
@@ -149,7 +144,6 @@ async function main() {
         if (whitelistedDialogsLog.size > 0) {
             console.log(`\nTotal ${whitelistedDialogsLog.size} item terdeteksi dalam whitelist username dan tidak akan ditawarkan untuk ditinggalkan.`);
         }
-
 
         if (leaveableDialogs.length === 0) {
             console.log('Tidak ada grup atau channel yang bisa ditinggalkan (setelah filter whitelist atau tidak ada yang memenuhi kriteria).');
@@ -201,11 +195,12 @@ async function main() {
 
             try {
                 console.log(`Mencoba meninggalkan: "${dialog.title}" (Username: ${dialog.entity.username ? '@'+dialog.entity.username : 'TIDAK ADA'}) ...`);
+                // Menggunakan gram.Api
                 if (dialog.isChannel || (dialog.isGroup && dialog.entity?.className === 'Channel')) {
-                    await client.invoke( new Api.channels.LeaveChannel({ channel: dialog.entity }) );
+                    await client.invoke( new gram.Api.channels.LeaveChannel({ channel: dialog.entity }) );
                     console.log(`  Berhasil meninggalkan channel/supergroup: "${dialog.title}"`);
                 } else if (dialog.isGroup && dialog.entity?.className === 'Chat') {
-                    await client.invoke(new Api.messages.DeleteChatUser({ chatId: dialog.entity.id, userId: await client.getMe() }));
+                    await client.invoke(new gram.Api.messages.DeleteChatUser({ chatId: dialog.entity.id, userId: await client.getMe() }));
                     console.log(`  Berhasil meninggalkan grup dasar: "${dialog.title}"`);
                 } else {
                      console.warn(`  Tidak dapat menentukan metode untuk meninggalkan "${dialog.title}". Tipe entity: ${dialog.entity?.className}. Username: ${dialog.entity.username ? '@'+dialog.entity.username : 'TIDAK ADA'}`);
@@ -221,8 +216,8 @@ async function main() {
         console.error('Terjadi kesalahan umum dalam skrip:', error.message);
         if (error.code === 401 && (error.message.includes('SESSION_REVOKED') || error.message.includes('SESSION_EXPIRED') || error.message.includes('AUTH_KEY_UNREGISTERED'))) {
             console.error("Sesi Anda tidak valid/kedaluwarsa/dicabut. Hapus file 'session.txt' dan coba jalankan lagi untuk login ulang.");
-        } else if (error.message && error.message.includes("Cannot read properties of undefined (reading 'StringSession')")) {
-            console.error("Kesalahan kritis dengan StringSession. Pastikan library 'gram' terinstal dengan benar dan impor sudah sesuai.");
+        } else if (error.message && (error.message.includes("is not a constructor") || error.message.includes("Cannot read properties of undefined"))) {
+            console.error("Kesalahan kritis dengan komponen library 'gram'. Pastikan library 'gram' terinstal dengan benar (coba hapus node_modules dan package-lock.json, lalu jalankan 'npm install gram input dotenv' lagi). Versi library mungkin juga tidak kompatibel.");
         }
     } finally {
         if (client && client.connected) {
