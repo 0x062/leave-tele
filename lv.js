@@ -70,8 +70,8 @@ function loadWhitelistUsernames() {
 async function main() {
     let stringSessionValue = loadSession();
     const lowerCaseWhitelistUsernames = loadWhitelistUsernames(); // Muat whitelist di awal
-    const stringSession = new StringSession(stringSessionValue);
-
+    const stringSession = new sessions.StringSession(stringSessionValue);
+  
     console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v4)...');
     const client = new TelegramClient(stringSession, apiId, apiHash, {
         connectionRetries: 5,
