@@ -1,4 +1,3 @@
-+CDzhcy4ixak0Zjk1
 NTExhaust
 AirdropInsiderID
 airdropfind
@@ -20,3 +19,5 @@ NTExhaust_Discussion
 airdropinsideridchat
 union_report_bot
 maitrixme_bot
+BotFather
+Kedai_cryptobot
