@@ -18,3 +18,5 @@ atlasprotocol
 NEARMobile
 NTExhaust_Discussion
 airdropinsideridchat
+union_report_bot
+maitrixme_bot
