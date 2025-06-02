@@ -1,43 +1,13 @@
-// lv.js - Versi 6 (Final - Akses Eksplisit dengan Debugging)
+// lv.js - Versi 7 (Menggunakan paket 'telegram' untuk GramJS)
 require('dotenv').config();
 
-const gram = require('gram');
-
-// --- MULAI BLOK DEBUGGING ---
-console.log("================ DEBUGGING INFO START ================");
-console.log("Isi dari modul 'gram' (hasil dari require('gram')):");
-console.dir(gram, { depth: 2 }); // Menampilkan struktur objek 'gram' hingga kedalaman 2 level
-
-if (gram && typeof gram === 'object') {
-    console.log("\nProperti yang tersedia di objek 'gram':");
-    console.log(Object.keys(gram));
-
-    console.log("\nMengecek 'gram.sessions':");
-    console.log("Tipe dari 'gram.sessions':", typeof gram.sessions);
-    if (gram.sessions && typeof gram.sessions === 'object') {
-        console.log("Properti yang tersedia di 'gram.sessions':");
-        console.log(Object.keys(gram.sessions));
-        console.log("Tipe dari 'gram.sessions.StringSession':", typeof gram.sessions.StringSession);
-    } else if (gram.Sessions && typeof gram.Sessions === 'object') { // Cek jika 'Sessions' (huruf besar S)
-        console.log("MENEMUKAN 'gram.Sessions' (dengan S besar). Properti di dalamnya:");
-        console.log(Object.keys(gram.Sessions));
-        console.log("Tipe dari 'gram.Sessions.StringSession':", typeof gram.Sessions.StringSession);
-    } else {
-        console.log("'gram.sessions' (atau 'gram.Sessions') tidak ditemukan sebagai objek.");
-    }
-
-    console.log("\nMengecek 'gram.StringSession' (langsung):");
-    console.log("Tipe dari 'gram.StringSession':", typeof gram.StringSession);
-
-} else {
-    console.log("Modul 'gram' gagal diimpor atau bukan objek.");
-}
-console.log("================ DEBUGGING INFO END ==================");
-// --- SELESAI BLOK DEBUGGING ---
-
+// Menggunakan 'telegram' untuk GramJS
+const { TelegramClient, Api, sessions } = require('telegram');
 const input = require('input');
 const fs = require('node:fs');
 const path = require('node:path');
+
+// Hapus blok debugging karena kita sudah tahu masalahnya ada di nama paket
 
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
@@ -104,26 +74,12 @@ async function main() {
     let stringSessionValue = loadSession();
     const lowerCaseWhitelistUsernames = loadWhitelistUsernames();
 
-    // Baris yang menyebabkan error akan kita coba setelah melihat hasil debugging
-    // Untuk sekarang, kita coba buat instance StringSession dengan hati-hati
-    let stringSessionInstance;
-    if (gram && gram.sessions && typeof gram.sessions.StringSession === 'function') {
-        stringSessionInstance = new gram.sessions.StringSession(stringSessionValue);
-        console.log("Berhasil membuat instance StringSession via gram.sessions.StringSession");
-    } else if (gram && gram.Sessions && typeof gram.Sessions.StringSession === 'function') { // Coba dengan S besar
-        stringSessionInstance = new gram.Sessions.StringSession(stringSessionValue);
-        console.log("Berhasil membuat instance StringSession via gram.Sessions.StringSession (S besar)");
-    } else if (gram && typeof gram.StringSession === 'function') { // Coba langsung
-        stringSessionInstance = new gram.StringSession(stringSessionValue);
-        console.log("Berhasil membuat instance StringSession via gram.StringSession (langsung)");
-    } else {
-        console.error("Tidak dapat menemukan konstruktor StringSession yang valid dari modul 'gram'. Cek output debugging di atas.");
-        console.error("Pastikan library 'gram' terinstal dengan benar dan tidak korup. Coba 'rm -rf node_modules package-lock.json && npm install gram input dotenv'");
-        return; // Keluar jika StringSession tidak bisa dibuat
-    }
+    // Menggunakan sessions.StringSession dari paket 'telegram'
+    const stringSession = new sessions.StringSession(stringSessionValue);
 
-    console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v6 - debug)...');
-    const client = new gram.TelegramClient(stringSessionInstance, apiId, apiHash, {
+    console.log('Memuat skrip untuk keluar dari grup/channel Telegram (v7)...');
+    // Menggunakan TelegramClient dari paket 'telegram'
+    const client = new TelegramClient(stringSession, apiId, apiHash, {
         connectionRetries: 5,
     });
 
@@ -150,8 +106,6 @@ async function main() {
             saveSession(currentSession);
         }
         console.log('---\n');
-
-        // ... (sisa kode fungsi main tetap sama) ...
 
         if (!await input.confirm('Lanjutkan untuk mendapatkan daftar grup/channel dan memilih mana yang akan ditinggalkan? (y/n)')) {
             console.log('Proses dibatalkan oleh pengguna.');
@@ -196,6 +150,7 @@ async function main() {
         }
 
         console.log('\n--- PENTING ---');
+        // ... (sisa kode fungsi main tetap sama) ...
         console.log('Masukkan nomor urut grup/channel yang ingin Anda tinggalkan dari daftar di atas, dipisahkan koma (misal: 1,3,5).');
         console.log('Atau ketik "SEMUA" untuk mencoba meninggalkan semua yang terdaftar (yang tidak di-whitelist).');
         console.log('Atau ketik "BATAL" untuk keluar dari skrip.');
@@ -240,11 +195,12 @@ async function main() {
 
             try {
                 console.log(`Mencoba meninggalkan: "${dialog.title}" (Username: ${dialog.entity.username ? '@'+dialog.entity.username : 'TIDAK ADA'}) ...`);
+                // Menggunakan Api dari paket 'telegram'
                 if (dialog.isChannel || (dialog.isGroup && dialog.entity?.className === 'Channel')) {
-                    await client.invoke( new gram.Api.channels.LeaveChannel({ channel: dialog.entity }) );
+                    await client.invoke( new Api.channels.LeaveChannel({ channel: dialog.entity }) );
                     console.log(`  Berhasil meninggalkan channel/supergroup: "${dialog.title}"`);
                 } else if (dialog.isGroup && dialog.entity?.className === 'Chat') {
-                    await client.invoke(new gram.Api.messages.DeleteChatUser({ chatId: dialog.entity.id, userId: await client.getMe() }));
+                    await client.invoke(new Api.messages.DeleteChatUser({ chatId: dialog.entity.id, userId: await client.getMe() }));
                     console.log(`  Berhasil meninggalkan grup dasar: "${dialog.title}"`);
                 } else {
                      console.warn(`  Tidak dapat menentukan metode untuk meninggalkan "${dialog.title}". Tipe entity: ${dialog.entity?.className}. Username: ${dialog.entity.username ? '@'+dialog.entity.username : 'TIDAK ADA'}`);
@@ -256,13 +212,12 @@ async function main() {
             }
         }
         console.log('\nProses meninggalkan grup/channel selesai.');
-
     } catch (error) {
         console.error('Terjadi kesalahan umum dalam skrip:', error.message);
         if (error.code === 401 && (error.message.includes('SESSION_REVOKED') || error.message.includes('SESSION_EXPIRED') || error.message.includes('AUTH_KEY_UNREGISTERED'))) {
             console.error("Sesi Anda tidak valid/kedaluwarsa/dicabut. Hapus file 'session.txt' dan coba jalankan lagi untuk login ulang.");
         } else if (error.message && (error.message.includes("is not a constructor") || error.message.includes("Cannot read properties of undefined"))) {
-            console.error("Kesalahan kritis dengan komponen library 'gram'. Cek output debugging di atas.");
+            console.error("Kesalahan kritis dengan komponen library Telegram. Pastikan library 'telegram' terinstal dengan benar.");
         }
     } finally {
         if (client && client.connected) {
